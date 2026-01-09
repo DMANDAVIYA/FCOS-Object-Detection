@@ -83,9 +83,9 @@ def train(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_root', type=str, default=r'd:\A5\interviews\sapien\custom_objdetect\data\VOC2012_train_val\VOC2012_train_val')
-    parser.add_argument('--batch_size', type=int, default=4)
-    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--data_root', type=str, default='data/VOC2012_train_val/VOC2012_train_val')
+    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--save_dir', type=str, default='checkpoints')
     args = parser.parse_args()

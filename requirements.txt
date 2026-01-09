@@ -9,3 +9,9 @@ shapely
 yacs
 tensorboard
 gdown
+imgaug
+shapely
+yacs
+tensorboard
+pandas
+gdown
