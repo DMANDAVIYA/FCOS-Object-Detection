@@ -1,0 +1,11 @@
+torch
+torchvision
+opencv-python
+numpy
+tqdm
+matplotlib
+imgaug
+shapely
+yacs
+tensorboard
+gdown
