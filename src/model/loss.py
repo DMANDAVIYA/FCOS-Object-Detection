@@ -102,14 +102,12 @@ class FCOSLoss(nn.Module):
         for l, stride in enumerate(self.strides):
             feat_h, feat_w = logits[l].shape[-2:]
             
-            # Create grid points
             shift_x = torch.arange(0, feat_w, device=self.device) * stride
             shift_y = torch.arange(0, feat_h, device=self.device) * stride
             y, x = torch.meshgrid(shift_y, shift_x, indexing='ij')
-            # Center of the cell
             x = x + stride / 2
             y = y + stride / 2
-            points = torch.stack((x, y), -1).reshape(-1, 2) #(H*W, 2)
+            points = torch.stack((x, y), -1).reshape(-1, 2)
             all_points.append(points)
             
             all_logits.append(logits[l].permute(0, 2, 3, 1).reshape(logits[l].size(0), -1, logits[l].size(1)))
@@ -121,17 +119,11 @@ class FCOSLoss(nn.Module):
         all_center = torch.cat(all_center, dim=1)
         all_points = torch.cat(all_points, dim=0)
 
-        # 2. Assignment (ATSS Simplified Logic for brevity or standard Centre Sampling)
-        # Implementing ATSS fully is complex in one file. 
-        # Let's implement FCOS-style Center Sampling first for speed, or basic ATSS.
-        # Let's do a simplified ATSS-like logic (assign to closest levels + IoU threshold).
         
-        # Targets
         target_cls_list = []
         target_reg_list = []
         target_center_list = []
         
-        # Batched matching
         for i in range(len(targets['boxes'])):
              gt_boxes = targets['boxes'][i].to(self.device)
              gt_labels = targets['labels'][i].to(self.device)
@@ -142,69 +134,46 @@ class FCOSLoss(nn.Module):
                  target_center_list.append(torch.zeros_like(all_center[i]))
                  continue
 
-             # Compute Distances from all points to all GTs
-             # points: [A, 2], gt: [G, 4]
-             # Reg targets (l, t, r, b)
-             points = all_points # [A, 2]
+            
+             points = all_points 
              l = points[:, 0, None] - gt_boxes[:, 0]
              t = points[:, 1, None] - gt_boxes[:, 1]
              r = gt_boxes[:, 2] - points[:, 0, None]
              b = gt_boxes[:, 3] - points[:, 1, None]
-             reg_targets = torch.stack([l, t, r, b], dim=2) # [A, G, 4]
+             reg_targets = torch.stack([l, t, r, b], dim=2) 
 
-             # Check inside box
              min_dist = reg_targets.min(dim=2)[0]
              is_in_box = min_dist > 0
              
-             # Center Sampling (radius based) - FCOS default
-             # Use 1.5 * stride radius
-             # For simplicity in Custom implementation, let's use the basic "inside box" rule + level selection
              
-             # Assignment Rule: Max IoU or Min Area
-             # Calculate areas of GT to resolving ambiguities (smaller box preferred)
              areas = (gt_boxes[:, 2] - gt_boxes[:, 0]) * (gt_boxes[:, 3] - gt_boxes[:, 1])
-             areas = areas[None, :].repeat(len(all_points), 1) # [A, G]
+             areas = areas[None, :].repeat(len(all_points), 1) 
              
-             # Limit by feature level relevant range (Scale assignment)
-             # This requires mapping points back to levels.
-             # Ideally: Mask out points that are not within [min_range, max_range] for that level.
-             
-             # Let's just pick the single BEST GT for each point (min area)
+        
              areas[~is_in_box] = float('inf')
              min_area, min_area_mod = areas.min(dim=1)
              
              pos_mask = min_area < float('inf')
              pos_ind = min_area_mod[pos_mask]
              
-             # Labels
              labels = torch.zeros(all_logits.shape[1], 1, device=self.device, dtype=torch.long)
-             # Using 0 for BG, 1-N for Classes? 
-             # FCOSHead output num_classes. Usually optim uses Binary Focal Loss per class.
-             # So target should be [A, NumClasses]. 
+         
              labels_pos = gt_labels[pos_ind]
              
-             # Expand integer labels to one-hot for Focal Loss
-             # Actually sigmoid_focal_loss usually takes one-hot or we index it.
-             # Let's create target [A, C]
+         
              cls_target = torch.zeros((all_logits.shape[1], all_logits.shape[2]), device=self.device)
              
-             # Set 1.0 for positive classes
-             # pos_ind is index into GT, labels_pos is class index (0-4)
-             # points corresponding to pos_mask need to be set
              if len(pos_ind) > 0:
                   indices = torch.nonzero(pos_mask).squeeze(1)
-                  # indices is [P]
-                  # labels_pos is [P] (values 0-4)
                   cls_target[indices, labels_pos] = 1.0
 
-             # Regression Target
-             # Normalized distances? FCOS uses l,t,r,b directly usually.
+             
              reg_target_final = torch.zeros_like(all_bbox[i])
              if len(pos_ind) > 0:
                  reg_target_pos = reg_targets[pos_mask, pos_ind, :]
                  reg_target_final[pos_mask] = reg_target_pos
              
-             # Centerness Target
+             
              center_target_final = torch.zeros_like(all_center[i])
              if len(pos_ind) > 0:
                  l_ = reg_target_pos[:, 0]
@@ -220,29 +189,21 @@ class FCOSLoss(nn.Module):
              target_reg_list.append(reg_target_final)
              target_center_list.append(center_target_final)
 
-        # 3. Compute Losses
         target_cls = torch.stack(target_cls_list)
         target_reg = torch.stack(target_reg_list)
         target_center = torch.stack(target_center_list)
         
-        pos_mask_all = target_center.squeeze(-1) > 0 # Use centerness>0 as proxy for positive
+        pos_mask_all = target_center.squeeze(-1) > 0 
         num_pos = pos_mask_all.sum().clamp(min=1.0)
         
-        # Classification Loss (All samples)
         loss_cls = sigmoid_focal_loss(all_logits, target_cls, reduction='sum') / num_pos
         
-        # Regression Loss (Positive samples only)
         if pos_mask_all.sum() > 0:
             pred_pos = all_bbox[pos_mask_all]
             target_pos = target_reg[pos_mask_all]
             
-            # Convert ltrb to x1y1x2y2 for GIoU
-            # We need centers for this conversion.
-            # But wait, GIoU needs boxes.
-            # points needed again.
             points_pos = all_points.repeat(len(targets['boxes']), 1)[pos_mask_all.view(-1)]
             
-            # decode
             x1_p = points_pos[:, 0] - pred_pos[:, 0]
             y1_p = points_pos[:, 1] - pred_pos[:, 1]
             x2_p = points_pos[:, 0] + pred_pos[:, 2]
@@ -257,7 +218,6 @@ class FCOSLoss(nn.Module):
             
             loss_reg = giou_loss(pred_boxes, target_boxes, reduction='sum') / num_pos
             
-            # Centerness Loss
             loss_center = F.binary_cross_entropy_with_logits(all_center[pos_mask_all], target_center[pos_mask_all], reduction='sum') / num_pos
         else:
             loss_reg = torch.tensor(0.0).to(self.device).float()

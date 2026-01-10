@@ -1,0 +1,24 @@
+============================================================
+FCOS OBJECT DETECTION - METRICS REPORT
+============================================================
+
+MODEL SIZE: 72.92 MB
+TOTAL PARAMETERS: 19,104,847
+
+TRAINING SUMMARY:
+  Total Epochs: 50
+  Best mAP: 0.1552 (Epoch 46)
+  Final mAP: 0.1541
+  Final Loss: 1.4244
+
+EVALUATION RESULTS (mAP@0.5):
+  aeroplane   : 0.4812
+  bicycle     : 0.1977
+  bird        : 0.0470
+  boat        : 0.0432
+  bottle      : 0.0067
+  Mean AP     : 0.1552
+
+INFERENCE SPEED: 2.07 FPS
+
+============================================================

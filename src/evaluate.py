@@ -1,17 +1,19 @@
-
 import torch
 import numpy as np
 import argparse
+import os
+import sys
+import json
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 
-import sys
-import os
 sys.path.append('src')
 
 from data.voc_dataset import VOCDataset, collate_fn
 from data.transforms import build_transforms
 from model.detector import FCOSDetector
+
+CLASSES = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle']
 
 def calculate_ap(rec, prec):
     mrec = np.concatenate(([0.], rec, [1.]))
@@ -22,33 +24,24 @@ def calculate_ap(rec, prec):
     ap = np.sum((mrec[i + 1] - mrec[i]) * mpre[i + 1])
     return ap
 
-def evaluate(model, val_loader, device):
+def evaluate(model, val_loader, device, save_results=True):
     model.eval()
     
-    # GTs and Preds per class
-    # {class: [{'bbox': [x1,y1,x2,y2], 'used': False, 'image_id': id}, ...]}
     gt_db = {i: {} for i in range(5)} 
     det_db = {i: [] for i in range(5)}
     
-    # Load GTs
     print("Loading GTs...")
     count_gt = 0
-    # Note: iterating loader provides transformed images, but we need consistent tracking.
-    # We'll rely on batch order if shuffle=False.
     
-    # Actually, simpler to accumulate everything first
     print("Running Inference...")
     with torch.no_grad():
         img_idx = 0
         for images, boxes_list, labels_list in tqdm(val_loader):
             images = images.to(device)
-            # boxes_list are Tensor [N, 4], labels_list Tensor [N]
             
-            # Inference
-            outputs = model(images) # list of dicts: {'boxes':, 'scores':, 'labels':}
+            outputs = model(images)
             
             for i in range(len(images)):
-                # GT for this image
                 gt_boxes = boxes_list[i].numpy()
                 gt_labels = labels_list[i].numpy()
                 
@@ -58,7 +51,6 @@ def evaluate(model, val_loader, device):
                     gt_db[gl][img_idx].append({'bbox': gb, 'used': False})
                     count_gt += 1
                 
-                # Preds for this image
                 det_boxes = outputs[i]['boxes'].cpu().numpy()
                 det_scores = outputs[i]['scores'].cpu().numpy()
                 det_labels = outputs[i]['labels'].cpu().numpy()
@@ -69,20 +61,21 @@ def evaluate(model, val_loader, device):
                 img_idx += 1
     
     print("Calculating mAP...")
-    unmap_aps = []
+    aps = []
+    per_class_ap = {}
     
     for c in range(5):
         dets = det_db[c]
-        gts = gt_db[c] # {img_id: [objects]}
+        gts = gt_db[c]
         
-        # Total positive for this class
         npos = sum([len(gts[img_id]) for img_id in gts])
         
         if npos == 0:
-            unmap_aps.append(0.0)
+            aps.append(0.0)
+            per_class_ap[CLASSES[c]] = 0.0
+            print(f"Class {c} ({CLASSES[c]}): AP = 0.0000 (no GT)")
             continue
             
-        # Sort dets by score
         dets = sorted(dets, key=lambda x: x['score'], reverse=True)
         
         TP = np.zeros(len(dets))
@@ -93,7 +86,6 @@ def evaluate(model, val_loader, device):
             image_id = det['image_id']
             bb = det['bbox']
             
-            # Get GTs for this image
             if image_id not in gts:
                 FP[d] = 1.0
                 continue
@@ -103,7 +95,6 @@ def evaluate(model, val_loader, device):
             ovmax = -float('inf')
             jmax = -1
             
-            # Find best match
             bbgt = np.array([o['bbox'] for o in gt_objs])
             if bbgt.size > 0:
                 ixmin = np.maximum(bbgt[:, 0], bb[0])
@@ -128,34 +119,43 @@ def evaluate(model, val_loader, device):
             else:
                 FP[d] = 1.
                 
-        # Compute precision recall
         acc_FP = np.cumsum(FP)
         acc_TP = np.cumsum(TP)
         rec = acc_TP / npos
         prec = acc_TP / np.maximum(acc_TP + acc_FP, np.finfo(np.float64).eps)
         
         ap = calculate_ap(rec, prec)
-        unmap_aps.append(ap)
-        print(f"Class {c} AP: {ap:.4f}")
+        aps.append(ap)
+        per_class_ap[CLASSES[c]] = float(ap)
+        print(f"Class {c} ({CLASSES[c]}): AP = {ap:.4f}")
         
-    mAP = np.mean(unmap_aps)
+    mAP = np.mean(aps)
     print(f"Mean AP: {mAP:.4f}")
+    
+    if save_results:
+        os.makedirs('results', exist_ok=True)
+        results = {
+            'mean_ap': float(mAP),
+            'per_class_ap': per_class_ap
+        }
+        with open('results/evaluation_results.json', 'w') as f:
+            json.dump(results, f, indent=4)
+        print("Results saved to results/evaluation_results.json")
+    
     return mAP
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_root', type=str, default=r'd:\A5\interviews\sapien\custom_objdetect\data\VOC2012_train_val\VOC2012_train_val')
+    parser.add_argument('--data_root', type=str, default='data/VOC2012_train_val/VOC2012_train_val')
     parser.add_argument('--checkpoint', type=str, required=True)
     args = parser.parse_args()
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    # Dataset
     val_dataset = VOCDataset(args.data_root, image_set='val', 
                              transform=build_transforms(is_train=False))
     val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, collate_fn=collate_fn)
     
-    # Model
     model = FCOSDetector(num_classes=5, use_gn=True)
     model.load_state_dict(torch.load(args.checkpoint, map_location=device))
     model.to(device)

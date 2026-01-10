@@ -1,13 +1,84 @@
-# FCOS Object Detection - Custom Implementation
+# FCOS Object Detection: From-Scratch Implementation
 
-A from-scratch implementation of FCOS (Fully Convolutional One-Stage Object Detection) trained on Pascal VOC 2012 subset.
+Complete implementation of FCOS (Fully Convolutional One-Stage Object Detection) trained from random initialization on Pascal VOC 2012 dataset.
 
-## Architecture
+## Overview
 
-**Backbone**: ResNet-18 with Group Normalization  
-**Neck**: Feature Pyramid Network (FPN) - Outputs P3, P4, P5, P6, P7  
-**Head**: FCOS Detection Head with shared towers for classification and regression  
-**Loss**: Focal Loss (classification) + GIoU Loss (regression) + BCE (centerness)
+This project demonstrates anchor-free object detection using FCOS architecture with:
+- **ResNet-18 backbone** with Group Normalization
+- **Feature Pyramid Network** (FPN) for multi-scale detection
+- **Advanced data augmentation** (Mosaic + MixUp)
+- **Specialized loss functions** (Focal Loss, GIoU Loss, Centerness)
+- **From-scratch training** without pre-trained weights
+
+**Performance:** mAP@0.5 = 0.1552 | FPS = 2.07 (CPU) | Parameters = 19.1M
+
+## Quick Start
+
+### 1. Environment Setup
+```bash
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### 2. Data Preparation
+```bash
+python setup_data.py
+```
+Downloads Pascal VOC 2012 dataset (5 classes: aeroplane, bicycle, bird, boat, bottle).
+
+### 3. Training
+```bash
+python src/train.py
+```
+Trains for 50 epochs with per-epoch evaluation. Best model saved to `checkpoints/best_model.pth`.
+
+### 4. Evaluation
+```bash
+python src/evaluate.py --checkpoint checkpoints/best_model.pth
+```
+Calculates mAP and per-class AP. Results saved to `results/evaluation_results.json`.
+
+### 5. Visualization
+```bash
+python visualize_training.py
+```
+Generates training curves (`results/training_curves.png`).
+
+### 6. Inference
+```bash
+python batch_inference.py --max_images 5
+```
+Runs inference on validation images, measures FPS, saves visualizations to `results/detections/`.
+
+### 7. Technical Report
+```bash
+cd d:/A5/interviews/sapien/custom_objdetect
+pdflatex report_part1_intro.tex
+pdflatex report_part2_architecture.tex
+pdflatex report_part3_results.tex
+```
+The comprehensive 30-page technical report is split into 3 modular parts for easy compilation.
+
+## Results Summary
+
+| Metric | Value |
+|--------|-------|
+| **mAP@0.5** | 0.1552 |
+| **Best Epoch** | 46 |
+| **Model Size** | 72.92 MB |
+| **Parameters** | 19,104,847 |
+| **Inference FPS** | 2.07 (CPU) |
+
+### Per-Class Performance
+| Class | AP@0.5 |
+|-------|--------|
+| Aeroplane | 0.4812 |
+| Bicycle | 0.1977 |
+| Bird | 0.0470 |
+| Boat | 0.0432 |
+| Bottle | 0.0067 |
 
 ## Project Structure
 
@@ -15,188 +86,127 @@ A from-scratch implementation of FCOS (Fully Convolutional One-Stage Object Dete
 custom_objdetect/
 ├── src/
 │   ├── model/
-│   │   ├── backbone.py      # ResNet-18 with GN
-│   │   ├── fpn.py           # Feature Pyramid Network
-│   │   ├── head.py          # FCOS detection head
-│   │   ├── detector.py      # Main FCOS model
-│   │   └── loss.py          # Loss functions
+│   │   ├── backbone.py          # ResNet-18 with Group Normalization
+│   │   ├── fpn.py               # Feature Pyramid Network
+│   │   ├── head.py              # FCOS detection head
+│   │   └── detector.py          # Complete FCOS model
 │   ├── data/
-│   │   ├── voc_dataset.py   # VOC dataset with Mosaic/MixUp
-│   │   └── transforms.py    # Image preprocessing
-│   ├── train.py             # Training script
-│   ├── evaluate.py          # Evaluation (mAP calculation)
-│   └── find_best.py         # Find best checkpoint
-├── data/                    # Dataset (extracted from data.zip)
-├── checkpoints/             # Training outputs
-├── requirements.txt
-└── zip_src.py              # Package src for deployment
+│   │   ├── voc_dataset.py       # Dataset loader
+│   │   └── transforms.py        # Mosaic + MixUp augmentation
+│   ├── train.py                 # Training script
+│   └── evaluate.py              # Evaluation script
+├── checkpoints/
+│   ├── best_model.pth           # Best model checkpoint
+│   └── training_history.csv     # Per-epoch metrics
+├── results/
+│   ├── training_curves.png      # Training visualization
+│   ├── evaluation_results.json  # mAP and per-class AP
+│   ├── training_summary.json    # Training statistics
+│   └── detections/              # Inference visualizations
+├── report_part1_intro.tex       # Technical report Part 1
+├── report_part2_architecture.tex # Technical report Part 2
+├── report_part3_results.tex     # Technical report Part 3
+├── setup_data.py                # Data download script
+├── visualize_training.py        # Training visualization
+├── batch_inference.py           # Batch inference + FPS
+└── requirements.txt             # Dependencies
 ```
 
-## Setup
+## Architecture Details
 
-### 1. Environment
-```bash
-python -m venv venv
-venv\Scripts\activate  # Windows
-# source venv/bin/activate  # Linux/Mac
-pip install -r requirements.txt
-```
+### Backbone: ResNet-18 + Group Normalization
+- Modified ResNet-18 with all BatchNorm replaced by GroupNorm (G=32)
+- Enables stable training with small batch sizes
+- Outputs multi-scale features: C3 (128ch), C4 (256ch), C5 (512ch)
 
-### 2. Data
+### FPN: Multi-Scale Feature Pyramid
+- 5 pyramid levels (P3-P7) with 256 channels each
+- Handles objects from 8 to 512+ pixels
+- Top-down pathway with lateral connections
 
-**Option A: Automatic Download (Recommended)**
+### Detection Head
+- Shared across all FPN levels
+- Two parallel branches:
+  - **Classification:** 4 conv layers → C classes (5)
+  - **Regression:** 4 conv layers → bbox (4) + centerness (1)
+- Learnable scale parameters per FPN level
 
-1. Update `setup_data.py` with your Google Drive link:
-```python
-DRIVE_LINK = "https://drive.google.com/file/d/YOUR_FILE_ID/view?usp=sharing"
-```
+### Loss Functions
+1. **Focal Loss** (α=0.25, γ=2.0) - Handles class imbalance
+2. **GIoU Loss** - Bounding box regression with gradient for non-overlapping boxes
+3. **Centerness Loss** - Suppresses low-quality predictions
 
-2. Run the setup script:
-```bash
-python setup_data.py
-```
+## Training Configuration
 
-This will download `data.zip` from Google Drive and extract it automatically.
-
-**Option B: Manual Download**
-
-1. Download `data.zip` from the provided Google Drive link
-2. Place it in the project root
-3. Extract:
-```bash
-# Windows
-Expand-Archive -Path data.zip -DestinationPath .
-
-# Linux/Mac
-unzip data.zip
-```
-
-**Expected structure after extraction**:
-```
-data/VOC2012_train_val/VOC2012_train_val/
-├── Annotations/
-├── JPEGImages/
-└── ImageSets/Main/
-```
-
-## Training
-
-### Basic Training
-```bash
-python src/train.py --data_root data/VOC2012_train_val/VOC2012_train_val --epochs 50 --batch_size 16
-```
-
-### Arguments
-- `--data_root`: Path to VOC dataset root
-- `--batch_size`: Training batch size (default: 4)
-- `--epochs`: Number of epochs (default: 10)
-- `--lr`: Learning rate (default: 1e-4)
-- `--save_dir`: Checkpoint directory (default: checkpoints)
-
-### What Happens During Training
-1. **Every Epoch**:
-   - Full training pass with Mosaic + MixUp augmentation
-   - Validation evaluation (mAP@0.5)
-   - Checkpoint saved: `checkpoints/fcos_epoch_N.pth`
-   - Metrics logged to: `checkpoints/training_history.csv`
-
-2. **Best Model Tracking**:
-   - Automatically saves `checkpoints/best_model.pth` when mAP improves
-
-### Training Outputs
-```
-checkpoints/
-├── fcos_epoch_1.pth
-├── fcos_epoch_2.pth
-├── ...
-├── fcos_epoch_50.pth
-├── best_model.pth
-└── training_history.csv
-```
-
-**training_history.csv** contains:
-- epoch
-- train_loss
-- cls_loss, reg_loss, cnt_loss
-- mAP
-
-## Evaluation
-
-### Full Validation Set
-```bash
-python src/evaluate.py --checkpoint checkpoints/best_model.pth --data_root data/VOC2012_train_val/VOC2012_train_val
-```
-
-### Output
-```
-Class         | AP       | Count
------------------------------------
-aeroplane     | 0.4523   | 285
-bicycle       | 0.3891   | 337
-bird          | 0.3654   | 459
-boat          | 0.2987   | 263
-bottle        | 0.2145   | 469
------------------------------------
-Mean AP       | 0.3440
-```
-
-## Finding Best Checkpoint
-
-If you have multiple checkpoints and want to find the best one:
-
-```bash
-python src/find_best.py
-```
-
-This runs a quick evaluation (100 images) on all checkpoints in `final_model/` and reports the winner.
+| Parameter | Value |
+|-----------|-------|
+| Optimizer | AdamW |
+| Learning Rate | 1e-4 |
+| Weight Decay | 1e-4 |
+| LR Schedule | Cosine Annealing |
+| Batch Size | 16 |
+| Epochs | 50 |
+| Gradient Clipping | 1.0 |
+| Augmentation | Mosaic (p=0.5) + MixUp (p=0.5) |
 
 ## Key Features
 
-### Data Augmentation
-- **Mosaic**: 4-image stitching (50% probability)
-- **MixUp**: Image blending (50% probability)
-- Standard: Resize to 512x512, normalization
+- **Anchor-Free Design:** No anchor boxes, simpler architecture
+- **Group Normalization:** Batch-size independent normalization
+- **Advanced Augmentation:** Mosaic and MixUp for data efficiency
+- **Per-Epoch Evaluation:** Track mAP during training
+- **Modular Implementation:** Clean, well-documented code
+- **Comprehensive Documentation:** 30-page technical report with mathematical derivations
 
-### Training Stability
-- **Group Normalization**: Works with small batch sizes
-- **Gradient Clipping**: Max norm 1.0
-- **AdamW Optimizer**: Weight decay 1e-4
-- **Cosine Annealing**: Learning rate scheduling
+## Technical Report
 
-### Classes (VOC Subset)
-1. aeroplane
-2. bicycle
-3. bird
-4. boat
-5. bottle
+The technical report is split into 3 parts for modularity:
 
-## Performance Notes
+1. **Part 1 (Introduction & Theory):** Background, related work, theoretical foundations
+2. **Part 2 (Architecture & Loss):** Detailed architecture, loss function derivations
+3. **Part 3 (Results & Analysis):** Experimental results, discussion, future work
 
-**Expected mAP@0.5**: 0.35-0.45 after 50 epochs on this 5-class subset
+Each part can be compiled independently or combined for the full 30-page report.
 
-**Training Time**:
-- GPU (T4): ~3 hours for 50 epochs
-- Local GPU (RTX 3060): ~2 hours for 50 epochs
+## Performance Analysis
 
-## Deployment
+### Why is mAP Low (0.1552)?
 
-To package the code for deployment:
-```bash
-python zip_src.py
+1. **Training from Scratch:** No ImageNet pre-training (expected gap: ~0.25 mAP)
+2. **Limited Capacity:** ResNet-18 vs ResNet-50/101
+3. **Small Dataset:** 5,717 images vs 1.2M for ImageNet
+4. **Short Training:** 50 epochs vs 100-200 typical for from-scratch
+
+### Comparison with Pre-trained Models
+- This model (from scratch): **0.1552**
+- FCOS + ResNet-50 (pre-trained): **~0.38-0.42**
+- FCOS + ResNet-101 (pre-trained): **~0.42-0.45**
+
+## Future Improvements
+
+1. **Pre-training:** Use ImageNet weights (+0.20-0.25 mAP)
+2. **Larger Backbone:** ResNet-50/101 (+0.10-0.15 mAP)
+3. **Extended Training:** 100-200 epochs (+0.05-0.10 mAP)
+4. **GPU Optimization:** TensorRT quantization (5-10x speedup)
+
+## Requirements
+
+- Python 3.8+
+- PyTorch 1.9+
+- CUDA (optional, for GPU training)
+- See `requirements.txt` for full dependencies
+
+## Citation
+
+If you use this implementation, please cite the original FCOS paper:
+
+```bibtex
+@inproceedings{tian2019fcos,
+  title={FCOS: Fully Convolutional One-Stage Object Detection},
+  author={Tian, Zhi and Shen, Chunhua and Chen, Hao and He, Tong},
+  booktitle={ICCV},
+  year={2019}
+}
 ```
 
-This creates `src.zip` containing all model code.
 
-## Troubleshooting
-
-**Out of Memory**:
-- Reduce `--batch_size` to 2 or 1
-- Reduce `num_workers` in `src/train.py` (line 24-25)
-
-**Slow Evaluation**:
-- Evaluation runs on full 5,823 validation images
-- Takes ~1 hour on CPU, ~10 minutes on GPU
-
-**Import Errors**:
-- Ensure you're running from project root
-- Check `sys.path.append('src')` is present in scripts

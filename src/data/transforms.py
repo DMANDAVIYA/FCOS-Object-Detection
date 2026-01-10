@@ -19,14 +19,8 @@ class Resize(object):
     def __call__(self, img, boxes=None, labels=None):
         h, w, _ = img.shape
         scale = self.size / max(h, w)
-        img = cv2.resize(img, (self.size, self.size)) # Square resize for simplicity in batching
-        
-        # But wait, plain resize distorts aspect ratio. 
-        # Standard practice: Resize longest edge, pad short edge.
-        # For simplicity in this assignment, let's just resize and adjust boxes.
-        # (Mosaic output is already square, so this is mostly for non-mosaic path)
-        
-        # Re-calc scale factors
+        img = cv2.resize(img, (self.size, self.size)) 
+       
         scale_x = self.size / w
         scale_y = self.size / h
         
@@ -38,7 +32,6 @@ class Resize(object):
 
 class ToTensor(object):
     def __call__(self, img, boxes=None, labels=None):
-        # Convert IMG from (H, W, C) [0-255] to (C, H, W) [0.0-1.0]
         img = torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
         return img, boxes, labels
 

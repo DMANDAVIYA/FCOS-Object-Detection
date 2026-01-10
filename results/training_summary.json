@@ -1,0 +1,8 @@
+{
+    "total_epochs": 50,
+    "final_train_loss": 1.424386135692703,
+    "best_mAP": 0.1551566095145253,
+    "best_epoch": 46,
+    "final_mAP": 0.1540704945586037,
+    "training_date": "2026-01-10 04:10:14"
+}

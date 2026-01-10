@@ -3,10 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class FrozenBatchNorm2d(nn.Module):
-    """
-    BatchNorm2d where the batch statistics and the affine parameters
-    are fixed.
-    """
     def __init__(self, n):
         super(FrozenBatchNorm2d, self).__init__()
         self.register_buffer("weight", torch.ones(n))
@@ -15,7 +11,6 @@ class FrozenBatchNorm2d(nn.Module):
         self.register_buffer("running_var", torch.ones(n))
 
     def forward(self, x):
-        # Cast all fixed parameters to half() if necessary
         scale = self.weight * (self.running_var + 1e-5).rsqrt()
         bias = self.bias - self.running_mean * scale
         scale = scale.reshape(1, -1, 1, 1)
@@ -46,28 +41,21 @@ class BasicBlock(nn.Module):
         return out
 
 class ResNet18(nn.Module):
-    """
-    Custom ResNet-18 with GroupNorm.
-    Returns features features from C3, C4, C5.
-    """
     def __init__(self, use_gn=True):
         super().__init__()
         self.in_channels = 64
         self.use_gn = use_gn
         
-        # Stem
         self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = nn.GroupNorm(32, 64) if use_gn else nn.BatchNorm2d(64)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         
-        # Layers
         self.layer1 = self._make_layer(64, 2, stride=1)
         self.layer2 = self._make_layer(128, 2, stride=2)
         self.layer3 = self._make_layer(256, 2, stride=2)
         self.layer4 = self._make_layer(512, 2, stride=2)
         
-        # Initialize weights
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -97,10 +85,10 @@ class ResNet18(nn.Module):
         x = self.relu(x)
         x = self.maxpool(x)
         
-        c2 = self.layer1(x) # 64, 1/4
-        c3 = self.layer2(c2) # 128, 1/8
-        c4 = self.layer3(c3) # 256, 1/16
-        c5 = self.layer4(c4) # 512, 1/32
+        c2 = self.layer1(x)
+        c3 = self.layer2(c2)
+        c4 = self.layer3(c3)
+        c5 = self.layer4(c4)
         
         return [c3, c4, c5]
 

@@ -10,17 +10,12 @@ class FCOSDetector(nn.Module):
     def __init__(self, num_classes=5, use_gn=True):
         super(FCOSDetector, self).__init__()
         
-        # 1. Backbone
         self.backbone = ResNet18(use_gn=use_gn)
-        # ResNet18 returns C3 (128), C4 (256), C5 (512)
         
-        # 2. FPN
         self.fpn = FPN([128, 256, 512], out_channels=256)
         
-        # 3. Head
         self.head = FCOSHead(in_channels=256, num_classes=num_classes, use_gn=use_gn)
         
-        # 4. Loss
         self.loss_func = FCOSLoss()
         
     def forward(self, images, targets=None):
@@ -29,31 +24,22 @@ class FCOSDetector(nn.Module):
             images: [N, 3, H, W]
             targets: list of dicts (during training)
         """
-        # Backbone
         c3, c4, c5 = self.backbone(images)
         
-        # FPN
-        features = self.fpn([c3, c4, c5]) # [P3, P4, P5, P6, P7]
+        features = self.fpn([c3, c4, c5]) 
         
-        # Head
         logits, bbox_reg, centerness = self.head(features)
         
         if self.training and targets is not None:
             return self.loss_func(logits, bbox_reg, centerness, targets)
         else:
-            # Inference Logic (Simple post-processing)
             return self._post_process(logits, bbox_reg, centerness, images.shape[-2:])
 
     def _post_process(self, logits, bbox_reg, centerness, img_size):
-        # Decode and NMS
-        # logits: list of [N, C, H, W]
-        # bbox_reg: list of [N, 4, H, W]
-        # centerness: list of [N, 1, H, W]
         
         detections = []
         strides = [8, 16, 32, 64, 128]
         
-        # Collect all candidates from all levels
         all_boxes = []
         all_scores = []
         all_labels = []
@@ -67,44 +53,33 @@ class FCOSDetector(nn.Module):
             
             n, c, h, w = cls_score.shape
             
-            # Grid
             shift_x = torch.arange(0, w, device=cls_score.device) * stride
             shift_y = torch.arange(0, h, device=cls_score.device) * stride
             y, x = torch.meshgrid(shift_y, shift_x, indexing='ij')
             x = x + stride / 2
             y = y + stride / 2
-            points = torch.stack((x, y), -1).reshape(-1, 2) # [H*W, 2]
+            points = torch.stack((x, y), -1).reshape(-1, 2) 
             
             cls_score = cls_score.permute(0, 2, 3, 1).reshape(n, -1, c)
             center_score = center_score.permute(0, 2, 3, 1).reshape(n, -1, 1)
             bbox_pred = bbox_pred.permute(0, 2, 3, 1).reshape(n, -1, 4)
             
-            # Apply centerness
             final_scores = torch.sqrt(cls_score * center_score)
             
-            # Filter low confidence
             thresh = 0.05
             for i in range(n):
-                scores_i = final_scores[i] # [HW, C]
-                boxes_i = bbox_pred[i] # [HW, 4]
-                points_i = points # [HW, 2]
+                scores_i = final_scores[i] 
+                boxes_i = bbox_pred[i] 
+                points_i = points 
                 
-                # Keep top K for speed
-                # Flatten scores
                 scores_flat = scores_i.flatten()
                 
-                # Filter indices
                 keep_idxs = scores_flat > thresh
                 if keep_idxs.sum() == 0:
                     continue
                     
                 scores_keep = scores_flat[keep_idxs]
-                # indices to (anchor_idx, class_idx)
-                # anchor_idx = idx // C
-                # class_idx = idx % C
-                # But we flattened. 
                 
-                # Simpler approach: Max per row
                 vals, idxs = scores_i.max(dim=1)
                 mask = vals > thresh
                 
@@ -116,7 +91,6 @@ class FCOSDetector(nn.Module):
                 boxes_per = boxes_i[mask]
                 points_per = points_i[mask]
                 
-                # Decode boxes
                 l_ = boxes_per[:, 0]
                 t_ = boxes_per[:, 1]
                 r_ = boxes_per[:, 2]
@@ -129,7 +103,6 @@ class FCOSDetector(nn.Module):
                 
                 boxes_decoded = torch.stack([x1, y1, x2, y2], dim=-1)
                 
-                # Clip to image
                 boxes_decoded[:, 0::2].clamp_(0, img_size[1])
                 boxes_decoded[:, 1::2].clamp_(0, img_size[0])
                 
@@ -138,7 +111,7 @@ class FCOSDetector(nn.Module):
                      all_scores.append([])
                      all_labels.append([])
                      
-                while len(all_boxes) <= i: # Fix index error logic
+                while len(all_boxes) <= i: 
                      all_boxes.append([])
                      all_scores.append([])
                      all_labels.append([])
@@ -147,7 +120,6 @@ class FCOSDetector(nn.Module):
                 all_scores[i].append(scores_per)
                 all_labels[i].append(class_per)
 
-        # NMS
         results = []
         import torchvision
         for i in range(N):
@@ -159,10 +131,8 @@ class FCOSDetector(nn.Module):
             scores = torch.cat(all_scores[i], dim=0)
             labels = torch.cat(all_labels[i], dim=0)
             
-            # Batched NMS
             keep = torchvision.ops.batched_nms(boxes, scores, labels, iou_threshold=0.6)
             
-            # Limit detections
             keep = keep[:100]
             
             results.append({
